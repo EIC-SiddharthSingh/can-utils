@@ -115,6 +115,8 @@ void print_usage(char *prg)
 	fprintf(stderr, "         -s <level>  (silent mode - %d: off (default) %d: animation %d: silent)\n", SILENT_OFF, SILENT_ANI, SILENT_ON);
 	fprintf(stderr, "         -b <can>    (bridge mode - send received frames to <can>)\n");
 	fprintf(stderr, "         -B <can>    (bridge mode - like '-b' with disabled loopback)\n");
+	fprintf(stderr, "         -z          (increment the CAN ID before echo requires -B or -b)\n");
+	fprintf(stderr, "         -w          (ignore bridge write errors requires -B or -b)\n");
 	fprintf(stderr, "         -u <usecs>  (delay bridge forwarding by <usecs> microseconds)\n");
 	fprintf(stderr, "         -l          (log CAN-frames into file. Sets '-s %d' by default)\n", SILENT_ON);
 	fprintf(stderr, "         -R <count>  (create a new log file after <count> CAN frames)\n");
@@ -235,6 +237,8 @@ int main(int argc, char **argv)
 {
 	fd_set rdfs;
 	int s[MAXSOCK];
+	int incrementcanid = 0;
+	int ignorebridgewriteerrors = 0;
 	int bridge = 0;
 	useconds_t bridge_delay = 0;
 	unsigned char timestamp = 0;
@@ -274,7 +278,7 @@ int main(int argc, char **argv)
 	last_tv.tv_sec  = 0;
 	last_tv.tv_usec = 0;
 
-	while ((opt = getopt(argc, argv, "t:ciaSs:b:B:u:ldxLn:r:R:heT:?")) != -1) {
+	while ((opt = getopt(argc, argv, "t:ciaSs:b:B:u:ldxLn:r:R:heT:zw?")) != -1) {
 		switch (opt) {
 		case 't':
 			timestamp = optarg[0];
@@ -314,6 +318,14 @@ int main(int argc, char **argv)
 			}
 			break;
 
+		case 'z':
+			incrementcanid = 1;
+			fprintf(stdout, "Increment CAN ID before echo enabled\n");
+			break;
+		case 'w':
+			ignorebridgewriteerrors = 1;
+			fprintf(stdout, "Ignore bridge write errors enabled\n");
+			break;
 		case 'b':
 		case 'B':
 			if (strlen(optarg) >= IFNAMSIZ) {
@@ -675,11 +687,16 @@ int main(int argc, char **argv)
 				if (bridge) {
 					if (bridge_delay)
 						usleep(bridge_delay);
-
+					if( (incrementcanid) && ((frame.can_id & 0x04000000) == 0) ) {
+						/*increment the can id if RTR bit isn't set*/
+						frame.can_id++;
+					}
 					nbytes = write(bridge, &frame, nbytes);
 					if (nbytes < 0) {
-						perror("bridge write");
-						return 1;
+						if(ignorebridgewriteerrors == 0) {
+							perror("bridge write");
+							return 1;
+						}
 					} else if ((size_t)nbytes != CAN_MTU && (size_t)nbytes != CANFD_MTU) {
 						fprintf(stderr,"bridge write: incomplete CAN frame\n");
 						return 1;
