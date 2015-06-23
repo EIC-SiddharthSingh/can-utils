@@ -117,6 +117,7 @@ void print_usage(char *prg)
 	fprintf(stderr, "         -B <can>    (bridge mode - like '-b' with disabled loopback)\n");
 	fprintf(stderr, "         -u <usecs>  (delay bridge forwarding by <usecs> microseconds)\n");
 	fprintf(stderr, "         -l          (log CAN-frames into file. Sets '-s %d' by default)\n", SILENT_ON);
+	fprintf(stderr, "         -R <count>  (create a new log file after <count> CAN frames)\n");
 	fprintf(stderr, "         -L          (use log file format on stdout)\n");
 	fprintf(stderr, "         -n <count>  (terminate after receiption of <count> CAN frames)\n");
 	fprintf(stderr, "         -r <size>   (set socket receive buffer to <size>)\n");
@@ -201,6 +202,37 @@ int idx2dindex(int ifidx, int socket) {
 	return i;
 }
 
+int create_log_file(FILE **log_file) {
+	time_t currtime;
+	struct tm now;
+	char fname[sizeof("candump-2006-11-20_202026.log")+1];
+
+	if (time(&currtime) == (time_t)-1) {
+		perror("time");
+		return 1;
+	}
+
+	localtime_r(&currtime, &now);
+
+	sprintf(fname, "candump-%04d-%02d-%02d_%02d%02d%02d.log",
+		now.tm_year + 1900,
+		now.tm_mon + 1,
+		now.tm_mday,
+		now.tm_hour,
+		now.tm_min,
+		now.tm_sec);
+
+	fprintf(stderr, "\nEnabling Logfile '%s'\n\n", fname);
+
+	*log_file = fopen(fname, "w");
+	if (!*log_file) {
+		perror("logfile");
+		return 1;
+	}
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	fd_set rdfs;
@@ -218,6 +250,8 @@ int main(int argc, char **argv)
 	unsigned char log = 0;
 	unsigned char logfrmt = 0;
 	int count = 0;
+	int rotate_log_msg_count = 0;
+	int rotate_count = 0;
 	int rcvbuf_size = 0;
 	int opt, ret;
 	int currmax, numfilter;
@@ -244,7 +278,7 @@ int main(int argc, char **argv)
 	last_tv.tv_sec  = 0;
 	last_tv.tv_usec = 0;
 
-	while ((opt = getopt(argc, argv, "t:ciaSs:b:B:u:lDdxLn:r:heT:?")) != -1) {
+	while ((opt = getopt(argc, argv, "t:ciaSs:b:B:u:lDdxLn:r:R:heT:?")) != -1) {
 		switch (opt) {
 		case 't':
 			timestamp = optarg[0];
@@ -358,6 +392,15 @@ int main(int argc, char **argv)
 		case 'r':
 			rcvbuf_size = atoi(optarg);
 			if (rcvbuf_size < 1) {
+				print_usage(basename(argv[0]));
+				exit(1);
+			}
+			break;
+
+		case 'R':
+			rotate_log_msg_count = atoi(optarg);
+			rotate_count = rotate_log_msg_count;
+			if (rotate_log_msg_count < 1) {
 				print_usage(basename(argv[0]));
 				exit(1);
 			}
@@ -582,34 +625,9 @@ int main(int argc, char **argv)
 	}
 
 	if (log) {
-		time_t currtime;
-		struct tm now;
-		char fname[sizeof("candump-2006-11-20_202026.log")+1];
-
-		if (time(&currtime) == (time_t)-1) {
-			perror("time");
-			return 1;
-		}
-
-		localtime_r(&currtime, &now);
-
-		sprintf(fname, "candump-%04d-%02d-%02d_%02d%02d%02d.log",
-			now.tm_year + 1900,
-			now.tm_mon + 1,
-			now.tm_mday,
-			now.tm_hour,
-			now.tm_min,
-			now.tm_sec);
-
-		if (silent != SILENT_ON)
-			printf("\nWarning: console output active while logging!");
-
-		fprintf(stderr, "\nEnabling Logfile '%s'\n\n", fname);
-
-		logfile = fopen(fname, "w");
-		if (!logfile) {
-			perror("logfile");
-			return 1;
+		if (create_log_file(&logfile) == 0) {
+			if (silent != SILENT_ON)
+				printf("\nWarning: console output active while logging!");
 		}
 	}
 
@@ -670,6 +688,12 @@ int main(int argc, char **argv)
 
 				if (count && (--count == 0))
 					running = 0;
+
+				if (rotate_count && (--rotate_count == 0)) {
+					fclose(logfile);
+					rotate_count = rotate_log_msg_count;
+					create_log_file(&logfile);
+				}
 
 				if (bridge) {
 					if (bridge_delay)
