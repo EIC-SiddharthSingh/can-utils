@@ -60,7 +60,6 @@ bin_PROGRAMS = \
 	canlogserver \
 	canplayer \
 	cansend \
-	cansequence \
 	cansniffer \
 	isotpdump \
 	isotpperf \
@@ -75,7 +74,6 @@ bin_PROGRAMS = \
 	j1939sr \
 	log2asc \
 	log2long \
-	mcp251xfd-dump \
 	slcan_attach \
 	slcand \
 	slcanpty \
