@@ -28,6 +28,7 @@
 #include <linux/can/raw.h>
 
 #define CAN_ID_DEFAULT	(2)
+#define DEFAULT_GAP	(0)
 
 extern int optind, opterr, optopt;
 
@@ -60,6 +61,7 @@ static void print_usage(char *prg)
 		"Options:\n"
 		" -e, --extended		send extended frame\n"
 		" -i, --identifier=ID	CAN Identifier (default = %u)\n"
+		" -g, --gap=<us>		gap in microseconds (default = %u)\n"
 		"     --loop=COUNT	send message COUNT times\n"
 		" -p, --poll		use poll(2) to wait for buffer space while sending\n"
 		" -q, --quit <num>	quit if <num> wrong sequences are encountered\n"
@@ -67,7 +69,7 @@ static void print_usage(char *prg)
 		" -v, --verbose		be verbose (twice to be even more verbose\n"
 		" -h, --help		this help\n"
 		"     --version		print version information and exit\n",
-		prg, CAN_ID_DEFAULT);
+		prg, CAN_ID_DEFAULT, DEFAULT_GAP);
 }
 
 static void sig_handler(int signo)
@@ -186,7 +188,7 @@ static void do_receive()
 	}
 }
 
-static void do_send()
+static void do_send(unsigned int gap)
 {
 	unsigned int seq_wrap = 0;
 	uint8_t sequence = 0;
@@ -231,6 +233,7 @@ static void do_send()
 
 		frame.data[0]++;
 		sequence++;
+		usleep(gap);
 
 		if (verbose && !sequence)
 			printf("sequence wrap around (%d)\n", seq_wrap++);
@@ -249,6 +252,7 @@ int main(int argc, char **argv)
 	int extended = 0;
 	int receive = 0;
 	int opt;
+	unsigned int gap = DEFAULT_GAP;
 
 	sigaction(SIGINT, &act, NULL);
 	sigaction(SIGTERM, &act, NULL);
@@ -258,6 +262,7 @@ int main(int argc, char **argv)
 		{ "extended",	no_argument,		0, 'e' },
 		{ "identifier",	required_argument,	0, 'i' },
 		{ "loop",	required_argument,	0, 'l' },
+		{ "gap", required_argument, 0, 'd' },
 		{ "poll",	no_argument,		0, 'p' },
 		{ "quit",	optional_argument,	0, 'q' },
 		{ "receive",	no_argument,		0, 'r' },
@@ -286,6 +291,14 @@ int main(int argc, char **argv)
 				infinite = false;
 			} else {
 				infinite = true;
+			}
+			break;
+
+		case 'd':
+			if (optarg) {
+				gap = strtoul(optarg, NULL, 0);
+			} else {
+				gap = DEFAULT_GAP;
 			}
 			break;
 
@@ -361,7 +374,7 @@ int main(int argc, char **argv)
 	if (receive)
 		do_receive();
 	else
-		do_send();
+		do_send(gap);
 
 	exit(EXIT_SUCCESS);
 }
