@@ -262,7 +262,7 @@ int main(int argc, char **argv)
 		{ "extended",	no_argument,		0, 'e' },
 		{ "identifier",	required_argument,	0, 'i' },
 		{ "loop",	required_argument,	0, 'l' },
-		{ "gap", required_argument, 0, 'd' },
+		{ "gap",	required_argument,	0, 'g' },
 		{ "poll",	no_argument,		0, 'p' },
 		{ "quit",	optional_argument,	0, 'q' },
 		{ "receive",	no_argument,		0, 'r' },
@@ -271,7 +271,7 @@ int main(int argc, char **argv)
 		{ 0,		0,			0, 0},
 	};
 
-	while ((opt = getopt_long(argc, argv, "ei:pq::rvh", long_options, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "eig:pq::rvh", long_options, NULL)) != -1) {
 		switch (opt) {
 		case 'e':
 			extended = true;
@@ -294,7 +294,7 @@ int main(int argc, char **argv)
 			}
 			break;
 
-		case 'd':
+		case 'g':
 			if (optarg) {
 				gap = strtoul(optarg, NULL, 0);
 			} else {
