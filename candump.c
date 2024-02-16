@@ -135,6 +135,10 @@ static void print_usage(char *prg)
 	fprintf(stderr, "         -S          (swap byte order in printed CAN data[] - marked with '%c' )\n", SWAP_DELIMITER);
 	fprintf(stderr, "         -s <level>  (silent mode - %d: off (default) %d: animation %d: silent)\n", SILENT_OFF, SILENT_ANI, SILENT_ON);
 	fprintf(stderr, "         -l          (log CAN-frames into file. Sets '-s %d' by default)\n", SILENT_ON);
+	fprintf(stderr, "         -f <fname>  (log CAN-frames into file <fname>. Sets '-s %d' by default\n", SILENT_ON);
+	fprintf(stderr, "                      if -R is used only the first file will have <fname>)\n");
+	fprintf(stderr, "         -R <count>  (create a new log file after <count> CAN frames\n");
+	fprintf(stderr, "                      if -f is used only the first file will have <fname>)\n");
 	fprintf(stderr, "         -L          (use log file format on stdout)\n");
 	fprintf(stderr, "         -n <count>  (terminate after reception of <count> CAN frames)\n");
 	fprintf(stderr, "         -r <size>   (set socket receive buffer to <size>)\n");
@@ -276,6 +280,41 @@ static inline void print_timestamp(const char timestamp, const struct timeval *t
 	printf("%s", buffer);
 }
 
+static int create_log_file(char *log_name, FILE **log_file)
+{
+	time_t currtime;
+	struct tm now;
+	static char fname[83]; /* suggested by -Wformat-overflow= */
+
+	if (log_name == NULL) {
+		if (time(&currtime) == (time_t)-1) {
+			perror("time");
+			return 1;
+		}
+
+		localtime_r(&currtime, &now);
+
+		snprintf(fname, sizeof(fname), "candump-%04d-%02d-%02d_%02d%02d%02d.log",
+			now.tm_year + 1900,
+			now.tm_mon + 1,
+			now.tm_mday,
+			now.tm_hour,
+			now.tm_min,
+			now.tm_sec);
+		log_name = fname;
+	}
+
+	fprintf(stderr, "Enabling Logfile '%s'\n", log_name);
+
+	*log_file = fopen(log_name, "w");
+	if (!*log_file) {
+		perror("logfile");
+		return 1;
+	}
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	int fd_epoll;
@@ -296,6 +335,8 @@ int main(int argc, char **argv)
 	unsigned char log = 0;
 	unsigned char logfrmt = 0;
 	int count = 0;
+	int rotate_log_msg_count = 0;
+	int rotate_count = 0;
 	int rcvbuf_size = 0;
 	int opt, num_events;
 	int currmax, numfilter;
@@ -314,6 +355,7 @@ int main(int argc, char **argv)
 	struct timeval tv, last_tv;
 	int timeout_ms = -1; /* default to no timeout */
 	FILE *logfile = NULL;
+	const char *logname = NULL;
 
 	signal(SIGTERM, sigterm);
 	signal(SIGHUP, sigterm);
@@ -322,7 +364,7 @@ int main(int argc, char **argv)
 	last_tv.tv_sec = 0;
 	last_tv.tv_usec = 0;
 
-	while ((opt = getopt(argc, argv, "t:HciaSs:lDdxLn:r:he8T:?")) != -1) {
+	while ((opt = getopt(argc, argv, "t:HciaSs:lDdxLn:f:R:r:he8T:?")) != -1) {
 		switch (opt) {
 		case 't':
 			timestamp = optarg[0];
@@ -378,6 +420,21 @@ int main(int argc, char **argv)
 			log = 1;
 			break;
 
+		case 'R':
+			if (logname) {
+				print_usage(basename(argv[0]));
+				fprintf(stderr, "\nERROR: -R <count> and -f <fname> are not compatible\n");
+				exit(1);
+			}
+			rotate_log_msg_count = atoi(optarg);
+			rotate_count = rotate_log_msg_count;
+			if (rotate_log_msg_count < 1) {
+				print_usage(basename(argv[0]));
+				exit(1);
+			}
+			log = 1;
+			break;
+
 		case 'D':
 			down_causes_exit = 0;
 			break;
@@ -392,6 +449,16 @@ int main(int argc, char **argv)
 
 		case 'L':
 			logfrmt = 1;
+			break;
+
+		case 'f':
+			if (rotate_log_msg_count) {
+				print_usage(basename(argv[0]));
+				fprintf(stderr, "\nERROR: -R <count> and -f <fname> are not compatible\n");
+				exit(1);
+			}
+			logname = optarg;
+			log = 1;
 			break;
 
 		case 'n':
@@ -651,35 +718,11 @@ int main(int argc, char **argv)
 	}
 
 	if (log) {
-		time_t currtime;
-		struct tm now;
-		char fname[83]; /* suggested by -Wformat-overflow= */
-
-		if (time(&currtime) == (time_t)-1) {
-			perror("time");
+		if (create_log_file((char *)logname, &logfile))
 			return 1;
-		}
-
-		localtime_r(&currtime, &now);
-
-		sprintf(fname, "candump-%04d-%02d-%02d_%02d%02d%02d.log",
-			now.tm_year + 1900,
-			now.tm_mon + 1,
-			now.tm_mday,
-			now.tm_hour,
-			now.tm_min,
-			now.tm_sec);
 
 		if (silent != SILENT_ON)
 			fprintf(stderr, "Warning: Console output active while logging!\n");
-
-		fprintf(stderr, "Enabling Logfile '%s'\n", fname);
-
-		logfile = fopen(fname, "w");
-		if (!logfile) {
-			perror("logfile");
-			return 1;
-		}
 	}
 
 	/* these settings are static and can be held out of the hot path */
@@ -731,6 +774,19 @@ int main(int argc, char **argv)
 
 			if (count && (--count == 0))
 				running = 0;
+
+			if (rotate_count && (--rotate_count == 0)) {
+				fclose(logfile);
+				logfile = NULL;
+				logname = NULL;
+				rotate_count = rotate_log_msg_count;
+				if (silent != SILENT_ON)
+					fprintf(stderr, "Warning: Console output active while logging!\n");
+
+				if (create_log_file((char *)logname, &logfile))
+					return 1;
+
+			}
 
 			for (cmsg = CMSG_FIRSTHDR(&msg);
 			     cmsg && (cmsg->cmsg_level == SOL_SOCKET);
@@ -845,7 +901,7 @@ int main(int argc, char **argv)
 
 	close(fd_epoll);
 
-	if (log)
+	if (logfile)
 		fclose(logfile);
 
 	return 0;
